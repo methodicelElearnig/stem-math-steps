@@ -951,6 +951,10 @@ function showScore() {
   if (overlay) overlay.classList.add('open');
   lomdaState.complete = true;
   post('LOMDA_COMPLETE', { score: score, passed: score >= PASS_SCORE });
+  // Actually take the learner to the score screen so the grade is shown
+  // (the finish button previously only filled the values + posted complete).
+  var scoreSec = $('.screen[data-kind="score"]');
+  if (scoreSec) goTo(Number(scoreSec.getAttribute('data-screen')));
 }
 
 

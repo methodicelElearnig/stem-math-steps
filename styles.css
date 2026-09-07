@@ -98,7 +98,7 @@ html, body {
    shift right of the unshifted 141. translateX first in the list (applied
    AFTER scale, per CSS's right-to-left composition) so the 200.25px is real
    screen pixels, not scaled-down ones. */
-.screen.graded[data-slug="q5"] .graphic { transform: translateX(200.25px) scale(.55); transform-origin: top left; }
+.screen.graded[data-slug="q5"] .graphic { transform: translateX(129.25px) scale(.55); transform-origin: top left; }
 /* Per request: .btn-zoom (BTN_ZOOM in design.py) sits at a fixed position
    near the FULL-size map's own top-left corner always -- it doesn't live
    inside .graphic (it's a sibling, so it can stay clickable/undistorted at
@@ -107,7 +107,7 @@ html, body {
    shrinks. Same transform as the map: matches its own new top-left, and
    scales down with it so it stays in the same proportion to the map instead
    of reading oversized next to a now-smaller map. */
-.screen.graded[data-slug="q5"] .btn-zoom { transform: translateX(200.25px) scale(.55); transform-origin: top left; }
+.screen.graded[data-slug="q5"] .btn-zoom { transform: translateX(129.25px) scale(.55); transform-origin: top left; }
 
 /* q7: per request, the chart stays q6's own full size (300,171,737,485 --
    see GRAPHIC_BOX in design.py) while answering, and shrinks only once
@@ -588,6 +588,8 @@ html, body {
 }
 
 .feedback .fb-body p { margin: 0 0 2px; }
+/* q5 feedback fits in the left column below the map */
+.screen[data-slug="q5"] .feedback .fb-body { font-size: 30px; }
 
 /* q3's feedback text enlarged to 35px (vs the shared 36px --fb-fs everywhere
    else -- an intentional 1px under it, not a rounding slip) per request, now
@@ -1071,3 +1073,14 @@ html, body {
 /* the gated forward arrow: hidden and inert until script.js clears it */
 #app .hit.nav-fwd.is-gated { visibility: hidden; pointer-events: none; }
 
+
+
+/* Play-button hint tooltip (screen 2): white bubble above the play button,
+   auto-hidden once the video starts (play button gains .hidden). */
+.play-tip{position:absolute;left:830px;top:300px;width:260px;height:52px;background:#fff;
+  border-radius:14px;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:24px;color:#1c2b33;box-shadow:0 6px 16px rgba(0,0,0,.28);
+  z-index:6;pointer-events:none;}
+.play-tip::after{content:"";position:absolute;bottom:-9px;left:50%;transform:translateX(-50%);
+  border-left:10px solid transparent;border-right:10px solid transparent;border-top:10px solid #fff;}
+.video-play.hidden ~ .play-tip{display:none;}
