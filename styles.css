@@ -6,6 +6,7 @@
   --on-dark: #FFFFFF;
   --correct: #58B363;
   --wrong: #C0504D;
+  --partial: #E0A030;
   --feedback-bg: #363636;
   --stem-fs: 36px;
   --label-fs: 38px;
@@ -257,6 +258,7 @@ html, body {
 
 .screen.graded .answer .pill { display: grid; }
 .answer.is-correct .pill { background: var(--correct); color: var(--on-dark); }
+.answer.is-partial .pill { background: var(--partial); color: var(--on-dark); }
 .answer.is-wrong .pill { background: var(--wrong); color: var(--on-dark); }
 
 /* a vector tick/cross beside the 70px-tall answer box -- see mark_icon() in
@@ -418,9 +420,23 @@ html, body {
   padding: 0;
   border: 0;
   background: none;
+  /* Without this, starting the custom pointer-drag (script.js) on a cell's
+     own text -- most often a filled slot's value -- can instead kick off the
+     browser's native text/element selection, which preventDefault() on
+     pointerdown can't be used to stop (that would also swallow the click a
+     plain tap needs, see the drag section's own comment on this exact
+     tension). user-select:none heads it off before it can start at all. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .cell img { position: absolute; inset: 0; width: 100%; height: 100%; }
+/* Every <img> is natively draggable by default in every engine, drag()able
+   attribute or not -- without this, starting a drag from on top of a token's
+   own image can hijack the gesture into the browser's OWN "drag this image
+   out" behaviour (most reliably reproduced in Safari) instead of the custom
+   pointer-based drag in script.js. */
+.cell img { -webkit-user-drag: none; user-drag: none; }
 
 .cell .val {
   position: absolute;
@@ -483,6 +499,38 @@ html, body {
    used token has nothing left to do there. */
 .cell.token.used { display: none; }
 .cell:focus-visible { outline: 4px solid #299FD4; outline-offset: 3px; border-radius: 18px; }
+
+/* Custom pointer-based drag (mouse + touch + pen alike): touch-action:none
+   stops the browser's own scroll/zoom gesture recognizer from stealing a
+   touchmove before script.js's pointer handlers ever see it. */
+.cell.token, .cell.slot-cell { touch-action: none; }
+/* The cell being carried: dimmed in place while its ghost follows the
+   pointer -- .used above still wins once the drag actually lands. */
+.cell.dragging { opacity: .35; }
+/* The slot currently under the pointer mid-drag, same blue as .picked/
+   :focus-visible above, so a valid drop target reads as "drop here". */
+.slot.drop-hover { outline: 4px solid #299FD4; outline-offset: 3px; border-radius: 18px; }
+/* A viewport-fixed copy of the dragged cell's own box, following the raw
+   pointer. Fixed, not part of #app's scaled 1920x1080 canvas, so it needs no
+   scale math; pointer-events:none so elementFromPoint() sees through it to
+   the real slot underneath. */
+.drag-ghost {
+  position: fixed;
+  z-index: 999;
+  width: 126px;
+  height: 101px;
+  margin-left: -63px;
+  margin-top: -50px;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  font: 700 30px "Assistant", sans-serif;
+  color: var(--on-dark);
+  background: #17165B;
+  border-radius: 20px;
+  opacity: .92;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, .35);
+}
 
 /* Per-slot graded state (per request): a small coloured check/X badge above
    each slot (there is no ring to draw the mark inside, unlike .opt's dot, so
@@ -588,8 +636,11 @@ html, body {
 }
 
 .feedback .fb-body p { margin: 0 0 2px; }
-/* q5 feedback fits in the left column below the map */
-.screen[data-slug="q5"] .feedback .fb-body { font-size: 30px; }
+/* q5 feedback fits in the left column below the map -- .fb-reveal included
+   for the same reason as q4's own override below: it's a sibling of
+   .fb-body, not a child, so it doesn't inherit this. */
+.screen[data-slug="q5"] .feedback .fb-body,
+.screen[data-slug="q5"] .feedback .fb-reveal { font-size: 30px; }
 
 /* q3's feedback text enlarged to 35px (vs the shared 36px --fb-fs everywhere
    else -- an intentional 1px under it, not a rounding slip) per request, now
@@ -615,6 +666,7 @@ html, body {
 .feedback .fb-body.reflow p + p::before { content: " "; }
 .feedback .fb-head { display: block; font-weight: 700; margin-bottom: 4px; }
 .feedback.is-correct .fb-head { color: #8FE3A8; }
+.feedback.is-partial .fb-head { color: #FFD98F; }
 .feedback.is-wrong .fb-head { color: #FFB4B4; }
 .feedback.is-neutral .fb-head { display: none; }
 

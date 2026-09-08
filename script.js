@@ -104,13 +104,6 @@ function toNumber(raw) {
   return Number(s);
 }
 
-function sameSet(a, b) {
-  if (a.length !== b.length) return false;
-  var x = a.slice().sort(), y = b.slice().sort();
-  for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
-  return true;
-}
-
 
 /* --------------------------------------------------------------- navigation */
 
@@ -311,19 +304,35 @@ function updateSubmitVisibility(sec) {
   sec.classList.toggle('has-answer', isAnswered(sec));
 }
 
+// Returns the FRACTION of the question's marks earned (0..1), not a plain
+// boolean: 'number'/'single' are inherently all-or-nothing, but 'multi' and
+// 'drag' award partial credit per correct sub-answer/slot (per request) --
+// e.g. 2 of 3 correct drag slots is 2/3, not a flat zero.
 function grade(sec, given) {
   var raw = sec.getAttribute('data-answer');
   if (!raw) return null;
   var key = JSON.parse(raw);
-  if (key.kind === 'number') return toNumber(given) === toNumber(key.value);
-  if (key.kind === 'single') return given.length === 1 && given[0] === key.value;
-  if (key.kind === 'multi') return sameSet(given, key.value);
+  if (key.kind === 'number') return toNumber(given) === toNumber(key.value) ? 1 : 0;
+  if (key.kind === 'single') return (given.length === 1 && given[0] === key.value) ? 1 : 0;
+  if (key.kind === 'multi') {
+    if (!key.value.length) return 0;
+    // Jaccard similarity of the picked set against the correct set (hits over
+    // the SIZE OF THEIR UNION, not just the correct count) -- reaches 1 only
+    // for an exact match and 0 only when nothing picked was right, and a
+    // wrong extra pick dilutes the score without being able to cancel out a
+    // correct one the way a flat per-wrong-pick subtraction would (1 right +
+    // 1 wrong must stay a partial credit, not collapse straight to zero).
+    var hits = key.value.filter(function (v) { return given.indexOf(v) !== -1; }).length;
+    var wrongPicks = given.filter(function (v) { return key.value.indexOf(v) === -1; }).length;
+    return hits / (key.value.length + wrongPicks);
+  }
   if (key.kind === 'drag') {
-    if (given.length !== key.value.length) return false;
+    if (!key.value.length) return 0;
+    var right = 0;
     for (var i = 0; i < key.value.length; i++) {
-      if (toNumber(given[i]) !== toNumber(key.value[i])) return false;
+      if (toNumber(given[i]) === toNumber(key.value[i])) right++;
     }
-    return true;
+    return right / key.value.length;
   }
   return null;
 }
@@ -338,7 +347,8 @@ function check(sec) {
     return;
   }
   var given = readAnswer(sec);
-  var correct = grade(sec, given);
+  var fraction = grade(sec, given);
+  var correct = fraction === 1;
 
   lomdaState.attempts[slug] = (lomdaState.attempts[slug] || 0) + 1;
 
@@ -349,10 +359,10 @@ function check(sec) {
   var scored = already ? already.scored : null;
   if (scored === null || scored === undefined) {
     var weight = Number(sec.getAttribute('data-weight')) || 0;
-    scored = correct ? MARKS_PER_QUESTION * weight : 0;
+    scored = (fraction || 0) * MARKS_PER_QUESTION * weight;
     lomdaState.score = Math.round((lomdaState.score + scored) * 100) / 100;
   }
-  lomdaState.answers[slug] = { correct: correct, given: given, scored: scored };
+  lomdaState.answers[slug] = { correct: correct, fraction: fraction, given: given, scored: scored };
 
   showResult(sec);
 }
@@ -852,13 +862,28 @@ function showResult(sec) {
   $$('.q-input, .opt input', sec).forEach(function (el) { el.disabled = true; });
   $$('.cell.token, .cell.slot-cell', sec).forEach(function (el) { el.disabled = true; });
 
+  // A 'multi' (checkbox) or 'drag' answer can be partially right -- a fraction
+  // strictly between 0 and 1 (see grade()) -- which gets its own נכון חלקית
+  // heading/colour and, like a fully wrong answer, starts collapsed behind the
+  // "לחצו כאן לתשובה הנכונה" prompt instead of showing the full explanation
+  // right away (see showFull below). 'single'/'number' are inherently
+  // all-or-nothing, so this never applies to them.
+  var answerData = JSON.parse(sec.getAttribute('data-answer') || '{}');
+  var answerKind = answerData.kind;
+  var isPartial = !res.correct && res.fraction > 0;
+  var showFull = !!res.correct || !!res.revealed;
+
   var head = $('.fb-head', sec);
   if (head) {
-    head.textContent = res.correct ? 'צדקת!' : 'זו טעות';
+    head.textContent = res.correct ? 'צדקת!' : (isPartial ? 'נכון חלקית' : 'זו טעות');
   }
   box.classList.remove('is-neutral');
   box.classList.toggle('is-correct', !!res.correct);
-  box.classList.toggle('is-wrong', !res.correct);
+  box.classList.toggle('is-partial', isPartial);
+  box.classList.toggle('is-wrong', !res.correct && !isPartial);
+  if (answerKind === 'multi' || answerKind === 'drag') {
+    box.classList.toggle('needs-reveal', !showFull);
+  }
 
   // Mirror the learner's own answer back into the pill — their answer, not the
   // model one, so a wrong attempt is shown in red rather than silently corrected.
@@ -872,23 +897,21 @@ function showResult(sec) {
   }
   if (row) {
     row.classList.toggle('is-correct', !!res.correct);
-    row.classList.toggle('is-wrong', res.correct === false);
+    row.classList.toggle('is-partial', isPartial);
+    row.classList.toggle('is-wrong', !res.correct && !isPartial);
   }
 
   // Per-slot marks/colouring for a drag question (per request), plus the
-  // two-stage reveal: a wrong answer marks the learner's own layout right/
-  // wrong in place and shows only the short .fb-reveal prompt (the full
+  // two-stage reveal: an unrevealed answer marks the learner's own layout
+  // right/wrong in place and shows only the short .fb-reveal prompt (the full
   // explanation's <p>s hidden via .needs-reveal, see styles.tmpl.css); res.revealed
   // (set by the .fb-reveal-link click handler below) is what snaps the
   // correct values into every slot and switches to the full explanation.
   // Runs before placeFeedback() below since it changes what's visible in the
   // panel, which placeFeedback() needs to measure correctly.
   if (sec.getAttribute('data-kind') === 'drag') {
-    var dkey = JSON.parse(sec.getAttribute('data-answer') || '{}');
-    var dright = Array.isArray(dkey.value) ? dkey.value : [];
+    var dright = Array.isArray(answerData.value) ? answerData.value : [];
     var dslots = $$('.slot-cell', sec);
-    var showFull = !!res.correct || !!res.revealed;
-    box.classList.toggle('needs-reveal', !showFull);
     if (res.revealed) {
       dslots.forEach(function (slot, i) {
         var want = dright[i] !== undefined ? String(dright[i]) : '';
@@ -898,7 +921,7 @@ function showResult(sec) {
       });
     }
     dslots.forEach(function (slot, i) {
-      if (!showFull && !res.correct) {
+      if (!showFull) {
         var given = slot.getAttribute('data-filled') || '';
         var want = dright[i] !== undefined ? String(dright[i]) : '';
         var ok = toNumber(given) === toNumber(want);
@@ -921,14 +944,20 @@ function showResult(sec) {
   // in made every panel 45px short of what it needed.
   placeFeedback(sec);
 
-  // Echo the choice the learner made, and mark which options were right.
+  // Echo the choice the learner made, and mark which options were right. A
+  // 'multi' question still in its stage-1 (unrevealed) view only marks the
+  // learner's OWN picks right/wrong -- a correct option they never picked
+  // stays unmarked, the same way an unrevealed drag slot never shows the
+  // model answer, until the reveal link is clicked (showFull).
   if (Array.isArray(res.given)) {
-    var key = JSON.parse(sec.getAttribute('data-answer') || '{}');
-    var right = Array.isArray(key.value) ? key.value : [key.value];
+    var right = Array.isArray(answerData.value) ? answerData.value : [answerData.value];
+    var stage1Multi = answerKind === 'multi' && !showFull;
     $$('.opt', sec).forEach(function (opt) {
       var idx = Number(opt.getAttribute('data-index'));
-      opt.classList.toggle('was-picked', res.given.indexOf(idx) !== -1);
-      opt.classList.toggle('was-right', right.indexOf(idx) !== -1);
+      var picked = res.given.indexOf(idx) !== -1;
+      var isRight = right.indexOf(idx) !== -1;
+      opt.classList.toggle('was-picked', picked);
+      opt.classList.toggle('was-right', stage1Multi ? (picked && isRight) : isRight);
     });
   }
 }
@@ -1026,6 +1055,10 @@ function wire() {
   });
 
   document.addEventListener('click', function (ev) {
+    // A pointer drag that actually moved already applied its own effect on
+    // pointerup below; without this the trailing click (mouseup/pointerup
+    // always fires one) would immediately re-trigger pick/place and undo it.
+    if (suppressClick) { suppressClick = false; return; }
     var t = ev.target;
 
     var navFwd = t.closest('.nav-fwd');
@@ -1109,33 +1142,122 @@ function wire() {
     }
   });
 
-  // Real HTML5 drag-and-drop for the token bank, alongside (not instead of)
+  // Custom pointer-based drag for the token bank, alongside (not instead of)
   // the click-to-pick/click-to-place pair above -- reuses the exact same
-  // dragSelection/placeInSlot() the click path uses, so a token dropped onto
-  // a slot is indistinguishable from one clicked into it.
-  document.addEventListener('dragstart', function (ev) {
-    var token = ev.target.closest && ev.target.closest('.token');
-    if (!token || token.getAttribute('data-used') === '1') { ev.preventDefault(); return; }
-    if (ev.dataTransfer) {
-      ev.dataTransfer.effectAllowed = 'move';
-      ev.dataTransfer.setData('text/plain', token.getAttribute('data-token-id') || '');
+  // dragSelection/placeInSlot()/releaseSlot() the click path uses, so a token
+  // dropped onto a slot is indistinguishable from one clicked into it.
+  //
+  // Built on Pointer Events rather than native HTML5 drag-and-drop: no
+  // browser fires dragstart from a touch gesture, so the native API is
+  // mouse-only. Hit-testing is our own elementFromPoint() at the raw pointer
+  // position, not the native dragover/drop coordinates, which sidesteps the
+  // native API's coordinate bugs under a transformed ancestor (see the
+  // #app scale() above) as a side effect.
+  var pointerDrag = null;   // {source, kind: 'token'|'slot', x0, y0, moved, ghost, pointerId}
+  var suppressClick = false;
+
+  function dragGhost(cell, x, y) {
+    var g = document.createElement('div');
+    g.className = 'drag-ghost';
+    g.textContent = valOf(cell).textContent;
+    g.style.left = x + 'px';
+    g.style.top = y + 'px';
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function clearDropHover() {
+    $$('.slot.drop-hover').forEach(function (s) { s.classList.remove('drop-hover'); });
+  }
+
+  function endPointerDrag() {
+    if (!pointerDrag) return;
+    pointerDrag.source.classList.remove('dragging');
+    if (pointerDrag.ghost) pointerDrag.ghost.remove();
+    clearDropHover();
+    pointerDrag = null;
+  }
+
+  document.addEventListener('pointerdown', function (ev) {
+    if (!ev.isPrimary || pointerDrag) return;
+    var sec = ev.target.closest && ev.target.closest('.screen');
+    if (!sec || sec.classList.contains('graded')) return;
+
+    var token = ev.target.closest && ev.target.closest('.cell.token');
+    var slot = !token && ev.target.closest && ev.target.closest('.slot');
+    var source = null, kind = null;
+    if (token && token.getAttribute('data-used') !== '1' && !token.disabled) {
+      source = token; kind = 'token';
+    } else if (slot && slot.getAttribute('data-filled')) {
+      source = slot; kind = 'slot';
     }
-    if (dragSelection && dragSelection !== token) dragSelection.classList.remove('picked');
-    dragSelection = token;
-    token.classList.add('picked');
+    if (!source) return;
+
+    // NOT ev.preventDefault() here: per spec, cancelling pointerdown also
+    // cancels the compatibility mousedown/click a plain tap depends on for
+    // the pick/place path above -- would silently break every non-drag tap.
+    // The inner <img>'s own native drag (the thing this would otherwise be
+    // guarding against) is instead switched off in CSS (-webkit-user-drag).
+    pointerDrag = { source: source, kind: kind, x0: ev.clientX, y0: ev.clientY, moved: false, ghost: null, pointerId: ev.pointerId };
   });
-  document.addEventListener('dragover', function (ev) {
-    if (ev.target.closest && ev.target.closest('.slot')) ev.preventDefault();
-  });
-  document.addEventListener('drop', function (ev) {
-    var slot = ev.target.closest && ev.target.closest('.slot');
-    if (!slot) return;
+
+  document.addEventListener('pointermove', function (ev) {
+    if (!pointerDrag || ev.pointerId !== pointerDrag.pointerId) return;
+    if (!pointerDrag.moved) {
+      // A small threshold before committing to "this is a drag, not a tap" --
+      // below it, pointerup below leaves the gesture alone entirely and the
+      // ordinary click listener's pick/place handles it instead.
+      if (Math.abs(ev.clientX - pointerDrag.x0) < 6 && Math.abs(ev.clientY - pointerDrag.y0) < 6) return;
+      pointerDrag.moved = true;
+      pointerDrag.ghost = dragGhost(pointerDrag.source, ev.clientX, ev.clientY);
+      pointerDrag.source.classList.add('dragging');
+    }
     ev.preventDefault();
-    if (!slot.getAttribute('data-filled')) placeInSlot(slot);
-    updateSubmitVisibility(slot.closest('.screen'));
+    pointerDrag.ghost.style.left = ev.clientX + 'px';
+    pointerDrag.ghost.style.top = ev.clientY + 'px';
+    clearDropHover();
+    var el = document.elementFromPoint(ev.clientX, ev.clientY);
+    var overSlot = el && el.closest && el.closest('.slot');
+    if (overSlot) overSlot.classList.add('drop-hover');
+  }, { passive: false });
+
+  document.addEventListener('pointerup', function (ev) {
+    if (!pointerDrag || ev.pointerId !== pointerDrag.pointerId) return;
+    var pd = pointerDrag;
+    var moved = pd.moved;
+    endPointerDrag();
+    if (!moved) return;   // a plain tap -- the click listener's pick/place applies instead
+
+    suppressClick = true;   // swallow the click this same press+release also fires
+    var el = document.elementFromPoint(ev.clientX, ev.clientY);
+    var targetSlot = el && el.closest && el.closest('.slot');
+    var sec = pd.source.closest('.screen');
+
+    if (pd.kind === 'token') {
+      if (targetSlot) {
+        if (targetSlot.getAttribute('data-filled')) releaseSlot(targetSlot);
+        dragSelection = pd.source;
+        placeInSlot(targetSlot);
+      }
+      // dropped outside any slot: the token was never placed, nothing to undo
+    } else if (targetSlot && targetSlot !== pd.source) {
+      // Moving an already-placed answer onto a different slot: per request,
+      // bumps whatever token was already there back to the bank first.
+      if (targetSlot.getAttribute('data-filled')) releaseSlot(targetSlot);
+      var id = pd.source.getAttribute('data-token-id');
+      var srcToken = id ? $('.token[data-token-id="' + id + '"]', sec) : null;
+      releaseSlot(pd.source);
+      if (srcToken) { dragSelection = srcToken; placeInSlot(targetSlot); }
+    } else if (!targetSlot) {
+      // Dragged an answer away and released it over nothing -- same result as
+      // tapping it: back to the bank.
+      releaseSlot(pd.source);
+    }
+    if (sec) updateSubmitVisibility(sec);
   });
-  document.addEventListener('dragend', function () {
-    if (dragSelection) dragSelection.classList.remove('picked');
+
+  document.addEventListener('pointercancel', function (ev) {
+    if (pointerDrag && ev.pointerId === pointerDrag.pointerId) endPointerDrag();
   });
 
   // .opt input is a radio/checkbox (fires 'change'); .q-input is text (fires
