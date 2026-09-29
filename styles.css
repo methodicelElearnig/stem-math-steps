@@ -487,6 +487,11 @@ html, body {
    without it this background is a plain square and visibly squares off the
    art's own rounded corners once filled. */
 .slot[data-filled] .val { color: var(--on-dark); background: #17165B; border-radius: 20px; }
+/* An empty drag slot shows a "?" until a token is dropped in it (data-filled
+   is set/removed by placeInSlot/releaseSlot, so this follows the state). The
+   ::before sits beside .val's own text, which script.js writes via textContent,
+   so nothing in the scoring or fill logic sees it. */
+.slot:not([data-filled]) .val::before { content: "?"; color: #8C93B8; font-weight: 700; }
 /* Per request: once graded, the leftover (never-dragged) tokens animate up
    to the column BANK_GRADED_X/Y0/PITCH in design.py describes, out of the
    feedback panel's way -- showResult()'s drag branch in script.js just
