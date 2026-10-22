@@ -932,6 +932,10 @@ html, body {
   cursor: pointer;
 }
 
+/* ---- final black "return to the model" screen ---------------------------- */
+.return-stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 0 120px; background: #000; }
+.return-text { margin: 0; text-align: center; font-size: 84px; line-height: 1.4; font-weight: 700; color: #fff; }
+
 /* ---- nudge -------------------------------------------------------------- */
 .nudge {
   position: absolute;

@@ -1107,6 +1107,8 @@ function wire() {
     if (scoreClose) {
       ev.preventDefault();
       $$('.score-overlay.open').forEach(function (o) { o.classList.remove('open'); });
+      var returnSec = $('.screen[data-kind="return"]');
+      if (returnSec) goTo(Number(returnSec.getAttribute('data-screen')));
       return;
     }
 
