@@ -1112,6 +1112,21 @@ function wire() {
       return;
     }
 
+    var returnClose = t.closest('.return-close');
+    if (returnClose) {
+      ev.preventDefault();
+      // Closes the popup window Moodle opened for the lomda. Browsers only allow
+      // window.close() on script-opened windows, so if it is still open a moment
+      // later, tell the learner to close it themselves.
+      try { window.close(); } catch (e) {}
+      try { if (window.top !== window) window.top.close(); } catch (e) {}
+      setTimeout(function () {
+        var hint = $('.return-hint', returnClose.closest('.screen'));
+        if (hint) hint.hidden = false;
+      }, 400);
+      return;
+    }
+
     var zoom = t.closest('.btn-zoom');
     if (zoom) {
       ev.preventDefault();
